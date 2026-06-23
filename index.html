@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="th" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>เกมผจญภัย พุทธประวัติ</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        pastelBlue: '#e0f2fe',
+                        pastelPink: '#fce7f3',
+                        pastelYellow: '#fef08a',
+                        pastelMint: '#a7f3d0',
+                        pastelPurple: '#e9d5ff',
+                    },
+                    boxShadow: {
+                        'soft': '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- MediaPipe สำหรับระบบ AR ตรวจจับมือ -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        /* Strict Layout & Mobile Optimizations */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow-x: hidden;
+            overflow-y: hidden;
+            touch-action: none; /* ป้องกันการลากรีเฟรชหน้าจอบนมือถือ */
+            background-color: #f8fafc;
+            font-family: 'Sarabun', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body.dark {
+            background-color: #0f172a;
+            color: #f1f5f9;
+        }
+
+        /* Glassmorphism Effect */
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+        body.dark .glass {
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Safe Area Padding สำหรับมือถือหน้าจอเจาะรูหรือมีบาก */
+        .safe-padding {
+            padding-top: env(safe-area-inset-top, 20px);
+            padding-bottom: env(safe-area-inset-bottom, 20px);
+        }
+
+        /* AR Cursor */
+        #ar-cursor {
+            position: fixed;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(circle, #fcd34d 0%, #f59e0b 100%);
+            border: 3px solid white;
+            border-radius: 50%;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.8);
+            transition: transform 0.1s ease;
+        }
+        #ar-cursor.pinched {
+            transform: translate(-50%, -50%) scale(0.6);
+            background: radial-gradient(circle, #fca5a5 0%, #ef4444 100%);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.8);
+        }
+
+        /* Canvas Elements */
+        #confetti-canvas {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 1000;
+        }
+        
+        /* Layout Rule: Flex Center constraint */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            max-width: 450px; /* บีบสัดส่วนหน้าจอให้พอดีมือถือ */
+            height: 100%;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        /* Animations */
+        @keyframes pop {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        
+        .hide { display: none !important; }
+    </style>
+</head>
+<body class="safe-padding transition-colors duration-300">
+
+    <!-- ซ่อน Video กล้องไว้เบื้องหลังสำหรับระบบ AR -->
+    <video id="input-video" class="hide" playsinline></video>
+    <div id="ar-cursor"></div>
+    <canvas id="confetti-canvas"></canvas>
+
+    <div class="app-container px-4">
+
+        <!-- หน้าเมนูหลัก (MENU VIEW) -->
+        <div id="view-menu" class="w-full h-full flex flex-col items-center justify-center space-y-6 animate-pop">
+            <div class="text-center">
+                <div class="text-6xl mb-4">???</div>
+                <h1 class="text-3xl font-bold text-slate-800 dark:text-white mb-2">เกมผจญภัย</h1>
+                <h2 class="text-xl text-slate-600 dark:text-slate-300 font-semibold mb-6">พุทธประวัติ</h2>
+            </div>
+
+            <button onclick="startGame('practice')" class="w-full py-4 glass rounded-3xl shadow-soft bg-pastelBlue dark:bg-slate-700 text-slate-800 dark:text-white text-xl font-bold active:scale-95 transition-transform">
+                ?? โหมดฝึกฝน
+            </button>
+            <button onclick="startGame('time')" class="w-full py-4 glass rounded-3xl shadow-soft bg-pastelPink dark:bg-slate-700 text-slate-800 dark:text-white text-xl font-bold active:scale-95 transition-transform">
+                ?? จับเวลา (60s)
+            </button>
+            <button onclick="startGame('adventure')" class="w-full py-4 glass rounded-3xl shadow-soft bg-pastelMint dark:bg-slate-700 text-slate-800 dark:text-white text-xl font-bold active:scale-95 transition-transform">
+                ?? ผจญภัย (5 ด่าน)
+            </button>
+
+            <!-- ตัวเลือกเปิดระบบจับการเคลื่อนไหวมือ (กล้องหน้า) -->
+            <div class="mt-8 flex items-center justify-between w-full p-4 glass rounded-3xl bg-white/50 dark:bg-slate-800/50">
+                <span class="font-bold text-slate-700 dark:text-slate-200">??? AR Hand Mode (ใช้กล้อง)</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="ar-toggle" class="sr-only peer" onchange="toggleAR(this)">
+                    <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-green-400"></div>
+                </label>
+            </div>
+            
+            <button onclick="toggleDarkMode()" class="mt-4 text-sm text-slate-500 dark:text-slate-400 underline">สลับโหมดมืด/สว่าง</button>
+        </div>
+
+        <!-- หน้าเล่นเกม (GAME VIEW) -->
+        <div id="view-game" class="w-full h-full flex flex-col items-center justify-start py-6 hide">
+            <!-- แผงคะแนนและสถานะด้านบน -->
+            <div class="w-full flex justify-between items-center glass px-6 py-3 rounded-3xl shadow-soft mb-6 bg-white/80 dark:bg-slate-800/80">
+                <div id="ui-score" class="font-bold text-lg text-amber-500">? 0</div>
+                <div id="ui-time" class="font-bold text-lg text-rose-500 hide">?? 60</div>
+                <div id="ui-level" class="font-bold text-lg text-indigo-500 hide">ด่าน 1</div>
+                <button onclick="showMenu()" class="text-slate-400 hover:text-slate-600 font-bold text-xl">??</button>
+            </div>
+
+            <!-- กล่องคำถาม -->
+            <div class="flex-1 flex flex-col items-center justify-center w-full mb-6">
+                <div id="question-emoji" class="text-8xl mb-4 drop-shadow-xl animate-pop" style="filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));">?</div>
+                <h3 id="question-text" class="text-2xl font-bold text-center text-slate-700 dark:text-slate-200 px-4">กำลังโหลด...</h3>
+            </div>
+
+            <!-- ตัวเลือกตอบคำถาม (5 หมวดหมู่พุทธประวัติ) -->
+            <div class="w-full grid grid-cols-2 gap-3 mb-2">
+                <button onclick="checkAnswer(0)" class="py-4 glass rounded-3xl bg-pastelBlue font-bold text-slate-800 text-lg shadow-soft active:scale-95 transition-transform">?? ประสูติ</button>
+                <button onclick="checkAnswer(1)" class="py-4 glass rounded-3xl bg-pastelPink font-bold text-slate-800 text-lg shadow-soft active:scale-95 transition-transform">?? ตรัสรู้</button>
+                <button onclick="checkAnswer(2)" class="py-4 glass rounded-3xl bg-pastelYellow font-bold text-slate-800 text-lg shadow-soft col-span-2 active:scale-95 transition-transform">?? ประกาศศาสนา</button>
+                <button onclick="checkAnswer(3)" class="py-4 glass rounded-3xl bg-pastelMint font-bold text-slate-800 text-lg shadow-soft active:scale-95 transition-transform">?? ปรินิพพาน</button>
+                <button onclick="checkAnswer(4)" class="py-4 glass rounded-3xl bg-pastelPurple font-bold text-slate-800 text-lg shadow-soft active:scale-95 transition-transform">?? หลักธรรม</button>
+            </div>
+        </div>
+
+        <!-- หน้าต่างความรู้และเฉลยเมื่อตอบ (KNOWLEDGE MODAL) -->
+        <div id="modal-knowledge" class="absolute inset-0 bg-slate-900/60 z-50 flex flex-col items-center justify-center p-4 hide backdrop-blur-sm">
+            <div class="glass w-full max-w-sm rounded-3xl p-6 flex flex-col items-center text-center shadow-2xl animate-pop bg-white dark:bg-slate-800">
+                <div id="modal-status" class="text-2xl font-bold mb-2"></div>
+                <div id="modal-emoji" class="text-6xl mb-4 drop-shadow-md">?</div>
+                <h3 id="modal-title" class="text-xl font-bold text-slate-800 dark:text-white mb-2">ชื่อตอน</h3>
+                <p id="modal-desc" class="text-slate-600 dark:text-slate-300 text-sm mb-6 leading-relaxed">คำอธิบาย</p>
+                <button onclick="nextQuestion()" class="w-full py-3 bg-gradient-to-r from-blue-400 to-indigo-500 text-white font-bold rounded-2xl text-lg shadow-soft active:scale-95 transition-transform">
+                    ไปต่อเลย ??
+                </button>
+            </div>
+        </div>
+
+        <!-- หน้าจอจบเกม (GAMEOVER VIEW) -->
+        <div id="view-gameover" class="w-full h-full flex flex-col items-center justify-center space-y-6 hide animate-pop">
+            <div class="text-6xl mb-2">??</div>
+            <h2 id="end-title" class="text-3xl font-bold text-slate-800 dark:text-white">จบเกม!</h2>
+            <div class="glass p-8 rounded-3xl bg-white/80 dark:bg-slate-800/80 shadow-soft text-center w-full">
+                <p class="text-slate-500 dark:text-slate-400 mb-2 font-semibold">คะแนนของคุณ</p>
+                <div id="end-score" class="text-6xl font-bold text-amber-500 mb-4">0</div>
+                <p id="end-msg" class="text-slate-600 dark:text-slate-300 font-medium">เก่งมากเลย!</p>
+            </div>
+            <button onclick="showMenu()" class="w-full py-4 glass rounded-3xl shadow-soft bg-pastelMint text-slate-800 text-xl font-bold active:scale-95 transition-transform mt-4">
+                ?? กลับเมนูหลัก
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        /* ==================== 1. DATABASE (คลังโจทย์พุทธประวัติ) ==================== */
+        // หมวดหมู่ (cat): 0=ประสูติ, 1=ตรัสรู้, 2=ประกาศศาสนา, 3=ปรินิพพาน, 4=หลักธรรม
+        const db = [
+            { emoji: '??', text: 'เจ้าชายสิทธัตถะประสูติ', title: 'ประสูติ', desc: 'เจ้าชายสิทธัตถะประสูติ ณ สวนลุมพินีวัน เมื่อประสูติแล้วทรงดำเนินได้ 7 ก้าว พร้อมมีดอกบัวรองรับ', cat: 0 },
+            { emoji: '??', text: 'ดอกบัว 7 ดอกรองรับพระบาท', title: 'ปาฏิหาริย์แห่งการประสูติ', desc: 'สัญลักษณ์ของความบริสุทธิ์และการประกาศความยิ่งใหญ่ในอนาคต', cat: 0 },
+            { emoji: '??', text: 'นั่งสมาธิใต้ต้นพระศรีมหาโพธิ์', title: 'การตรัสรู้', desc: 'พระพุทธเจ้าทรงค้นพบความจริงอันประเสริฐ (อริยสัจ 4) ในวันเพ็ญเดือน 6', cat: 1 },
+            { emoji: '??', text: 'ค้นพบความจริงของชีวิต', title: 'อริยสัจ 4', desc: 'การรู้แจ้งใน ทุกข์ สมุทัย นิโรธ มรรค คือแก่นของการตรัสรู้', cat: 1 },
+            { emoji: '??', text: 'หมุนกงล้อแห่งธรรม', title: 'ปฐมเทศนา', desc: 'ทรงแสดง "ธัมมจักกัปปวัตตนสูตร" แก่ปัญจวัคคีย์ ถือเป็นการเริ่มประกาศศาสนา', cat: 2 },
+            { emoji: '??', text: 'เผยแผ่คำสอนแก่ผู้คน', title: 'การประกาศศาสนา', desc: 'พระพุทธเจ้าทรงใช้เวลา 45 ปี เดินทางสอนประชาชนให้พ้นทุกข์', cat: 2 },
+            { emoji: '??', text: 'ดับขันธปรินิพพาน', title: 'การจากไปอย่างสงบ', desc: 'เสด็จดับขันธปรินิพพานใต้ต้นสาละคู่ ณ เมืองกุสินารา', cat: 3 },
+            { emoji: '??', text: 'ปัจฉิมโอวาท (คำสอนสุดท้าย)', title: 'ความไม่ประมาท', desc: 'ทรงฝากคำสอนสุดท้ายให้ชาวพุทธใช้ชีวิตด้วยความไม่ประมาท', cat: 3 },
+            { emoji: '???', text: 'หนทางดับทุกข์ 8 ประการ', title: 'มรรคมีองค์ 8', desc: 'ข้อปฏิบัติที่เป็นหนทางแห่งการดับทุกข์ เช่น สัมมาทิฏฐิ (เห็นชอบ)', cat: 4 },
+            { emoji: '???', text: 'ข้อห้ามทำความชั่ว 5 อย่าง', title: 'ศีล 5 (เบญจศีล)', desc: 'หลักเกณฑ์พื้นฐานที่ทำให้สังคมอยู่ร่วมกันอย่างสงบสุข', cat: 4 }
+        ];
+
+        /* ==================== 2. GAME STATE & LOGIC (ระบบควบคุมเกม) ==================== */
+        let state = {
+            mode: '', score: 0, time: 60, level: 1, streak: 0,
+            currentQ: null, timerInterval: null, isPaused: false
+        };
+
+        const UI = {
+            menu: document.getElementById('view-menu'),
+            game: document.getElementById('view-game'),
+            gameover: document.getElementById('view-gameover'),
+            modal: document.getElementById('modal-knowledge'),
+            score: document.getElementById('ui-score'),
+            time: document.getElementById('ui-time'),
+            level: document.getElementById('ui-level'),
+            qEmoji: document.getElementById('question-emoji'),
+            qText: document.getElementById('question-text'),
+            mStatus: document.getElementById('modal-status'),
+            mEmoji: document.getElementById('modal-emoji'),
+            mTitle: document.getElementById('modal-title'),
+            mDesc: document.getElementById('modal-desc'),
+        };
+
+        function hideAllViews() {
+            UI.menu.classList.add('hide');
+            UI.game.classList.add('hide');
+            UI.gameover.classList.add('hide');
+            UI.modal.classList.add('hide');
+        }
+
+        function showMenu() {
+            hideAllViews();
+            clearInterval(state.timerInterval);
+            UI.menu.classList.remove('hide');
+        }
+
+        function startGame(mode) {
+            state = { mode, score: 0, time: 60, level: 1, streak: 0, isPaused: false };
+            hideAllViews();
+            UI.game.classList.remove('hide');
+            
+            // สลับการแสดงผลสเตตัสตามโหมดที่เลือก
+            UI.time.classList.toggle('hide', mode !== 'time');
+            UI.level.classList.toggle('hide', mode !== 'adventure');
+            
+            updateUI();
+            nextQuestion(true); 
+
+            if (mode === 'time') {
+                state.timerInterval = setInterval(() => {
+                    if (!state.isPaused) {
+                        state.time--;
+                        updateUI();
+                        if (state.time <= 0) endGame();
+                    }
+                }, 1000);
+            }
+        }
+
+        function updateUI() {
+            UI.score.innerText = `? ${state.score}`;
+            UI.time.innerText = `?? ${state.time}`;
+            UI.level.innerText = `ด่าน ${state.level}`;
+        }
+
+        function nextQuestion(initial = false) {
+            if (!initial) {
+                UI.modal.classList.add('hide');
+                state.isPaused = false;
+
+                // อัปเกรดด่านในโหมดผจญภัยเมื่อตอบถูกต่อเนื่อง 3 ข้อ
+                if (state.mode === 'adventure' && state.streak >= 3) {
+                    state.level++;
+                    state.streak = 0;
+                    playCheer();
+                    if (state.level > 5) return endGame();
+                    updateUI();
+                }
+                if (state.mode === 'time' && state.time <= 0) return endGame();
+            }
+
+            // สุ่มข้อคำถามจากคลังโจทย์
+            const r = Math.floor(Math.random() * db.length);
+            state.currentQ = db[r];
+            
+            // เล่นเอฟเฟกต์เด้งคำถามใหม่
+            UI.qEmoji.classList.remove('animate-pop');
+            void UI.qEmoji.offsetWidth; 
+            UI.qEmoji.classList.add('animate-pop');
+
+            UI.qEmoji.innerText = state.currentQ.emoji;
+            UI.qText.innerText = state.currentQ.text;
+        }
+
+        function checkAnswer(catIndex) {
+            if (state.isPaused) return; 
+
+            const isCorrect = (catIndex === state.currentQ.cat);
+            state.isPaused = true; 
+
+            if (isCorrect) {
+                state.score += (state.mode === 'adventure') ? (state.level * 10) : 10;
+                state.streak++;
+                playSound('correct');
+                fireConfetti();
+                UI.mStatus.innerText = '?? ถูกต้อง!';
+                UI.mStatus.className = 'text-2xl font-bold mb-2 text-green-500';
+            } else {
+                state.streak = 0;
+                playSound('wrong');
+                UI.mStatus.innerText = '? ผิดจ้า...';
+                UI.mStatus.className = 'text-2xl font-bold mb-2 text-rose-500';
+            }
+
+            updateUI();
+            showKnowledgeCard();
+        }
+
+        function showKnowledgeCard() {
+            UI.mEmoji.innerText = state.currentQ.emoji;
+            UI.mTitle.innerText = state.currentQ.title;
+            UI.mDesc.innerText = state.currentQ.desc;
+            UI.modal.classList.remove('hide');
+        }
+
+        function endGame() {
+            hideAllViews();
+            clearInterval(state.timerInterval);
+            playCheer();
+            document.getElementById('end-score').innerText = state.score;
+            let msg = 'เยี่ยมมาก!';
+            if(state.score > 100) msg = 'อัจฉริยะพุทธประวัติ!';
+            document.getElementById('end-msg').innerText = msg;
+            UI.gameover.classList.remove('hide');
+        }
+
+        /* ==================== 3. AUDIO SYSTEM (ระบบจำลองเสียงโดยไม่ต้องใช้ไฟล์) ==================== */
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playTone(freq, type, duration, vol=0.1) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.value = freq;
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function playSound(type) {
+            if (type === 'correct') {
+                playTone(800, 'sine', 0.1, 0.1);
+                setTimeout(() => playTone(1200, 'sine', 0.2, 0.1), 100);
+            } else if (type === 'wrong') {
+                playTone(300, 'sawtooth', 0.3, 0.1);
+                setTimeout(() => playTone(200, 'sawtooth', 0.3, 0.1), 150);
+            }
+        }
+
+        function playCheer() {
+            playTone(523.25, 'sine', 0.5, 0.1); 
+            playTone(659.25, 'sine', 0.5, 0.1); 
+            playTone(783.99, 'sine', 0.5, 0.1); 
+            setTimeout(() => {
+                playTone(1046.50, 'sine', 0.8, 0.1); 
+                playTone(783.99, 'sine', 0.8, 0.1);
+            }, 300);
+        }
+
+        /* ==================== 4. CONFETTI (เอฟเฟกต์กระดาษฉลองผ่าน Canvas) ==================== */
+        const canvas = document.getElementById('confetti-canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let confettiAnimationId = null;
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function fireConfetti() {
+            const colors = ['#fce7f3', '#fef08a', '#a7f3d0', '#e0f2fe', '#e9d5ff', '#fbbf24', '#f472b6'];
+            for (let i = 0; i < 50; i++) {
+                particles.push({
+                    x: canvas.width / 2,
+                    y: canvas.height / 2,
+                    r: Math.random() * 6 + 4,
+                    dx: Math.random() * 10 - 5,
+                    dy: Math.random() * -10 - 5,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    tilt: Math.floor(Math.random() * 10) - 10,
+                    tiltAngleInc: (Math.random() * 0.07) + 0.05,
+                    tiltAngle: 0
+                });
+            }
+            if (!confettiAnimationId) renderConfetti();
+        }
+
+        function renderConfetti() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            let activeParticles = 0;
+
+            for (let i = 0; i < particles.length; i++) {
+                let p = particles[i];
+                if (p.y > canvas.height) continue; 
+                
+                activeParticles++;
+                p.tiltAngle += p.tiltAngleInc;
+                p.y += (Math.cos(p.tiltAngle) + 1 + p.r / 2) / 2;
+                p.x += Math.sin(p.tiltAngle) * 2;
+                p.dy += 0.2; 
+                p.y += p.dy;
+
+                ctx.beginPath();
+                ctx.lineWidth = p.r;
+                ctx.strokeStyle = p.color;
+                ctx.moveTo(p.x + p.tilt + p.r, p.y);
+                ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r);
+                ctx.stroke();
+            }
+
+            if (activeParticles > 0) {
+                confettiAnimationId = requestAnimationFrame(renderConfetti);
+            } else {
+                particles = [];
+                cancelAnimationFrame(confettiAnimationId);
+                confettiAnimationId = null;
+                ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            }
+        }
+
+        /* ==================== 5. MEDIAPIPE AR HANDS (ตรวจจับการจีบนิ้วผ่านกล้องหน้า) ==================== */
+        const videoElement = document.getElementById('input-video');
+        const cursorEl = document.getElementById('ar-cursor');
+        let arActive = false;
+        let camera = null;
+        let hands = null;
+        
+        let curX = window.innerWidth / 2;
+        let curY = window.innerHeight / 2;
+        let targetX = curX;
+        let targetY = curY;
+        let isPinched = false;
+        let lastPinchTime = 0;
+
+        function initMediaPipe() {
+            if (hands) return; 
+            
+            hands = new Hands({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }});
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 0, 
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onARResults);
+
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    if(arActive) await hands.send({image: videoElement});
+                },
+                width: 640,
+                height: 480,
+                facingMode: 'user'
+            });
+        }
+
+        function toggleAR(checkbox) {
+            arActive = checkbox.checked;
+            if (arActive) {
+                initMediaPipe();
+                camera.start();
+                cursorEl.style.display = 'block';
+                startCursorLoop();
+            } else {
+                if (camera) camera.stop();
+                cursorEl.style.display = 'none';
+            }
+        }
+
+        function onARResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                const indexTip = landmarks[8]; // ปลายนิ้วชี้
+                const thumbTip = landmarks[4]; // ปลายนิ้วโป้ง
+
+                // กลับแกน X เพราะกล้องหน้าเป็นกระจกเงา
+                targetX = (1 - indexTip.x) * window.innerWidth;
+                targetY = indexTip.y * window.innerHeight;
+
+                // คำนวณระยะห่างระหว่างนิ้วชี้กับนิ้วโป้ง
+                const dx = indexTip.x - thumbTip.x;
+                const dy = indexTip.y - thumbTip.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                const now = Date.now();
+                if (dist < 0.08) { // ถ้านิ้วชิดกันต่ำกว่าเกณฑ์ถือว่า "จีบมือคลิก"
+                    if (!isPinched && (now - lastPinchTime > 500)) {
+                        isPinched = true;
+                        lastPinchTime = now;
+                        cursorEl.classList.add('pinched');
+                        simulateClick(curX, curY);
+                    }
+                } else {
+                    isPinched = false;
+                    cursorEl.classList.remove('pinched');
+                }
+            }
+        }
+
+        function startCursorLoop() {
+            if (!arActive) return;
+            
+            // ตัวช่วยลดอาการสั่นของเป้าเคลื่อนที่ (LERP Smoothing)
+            curX = curX + (targetX - curX) * 0.4;
+            curY = curY + (targetY - curY) * 0.4;
+            
+            cursorEl.style.left = `${curX}px`;
+            cursorEl.style.top = `${curY}px`;
+            
+            requestAnimationFrame(startCursorLoop);
+        }
+
+        function simulateClick(x, y) {
+            cursorEl.style.display = 'none';
+            const el = document.elementFromPoint(x, y);
+            cursorEl.style.display = 'block';
+
+            if (el) {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                el.click();
+            }
+        }
+
+        /* ==================== MISC ==================== */
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+        }
+
+        // ปลดล็อกระบบเสียงบนมือถือหลังการทัชครั้งแรก
+        document.body.addEventListener('click', () => {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }, { once: true });
+
+    </script>
+</body>
+</html>
